@@ -1,0 +1,192 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Tic Tac Toe</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(180deg, #1f2937 0%, #111827 45%, #0f172a 100%);
+      color: #f8fafc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .app {
+      width: min(520px, 100%);
+      background: rgba(15, 23, 42, 0.98);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      box-shadow: 0 32px 80px rgba(15, 23, 42, 0.35);
+      border-radius: 28px;
+      padding: 28px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 2.1rem;
+      letter-spacing: -0.04em;
+    }
+    p.subtitle {
+      margin-top: 8px;
+      color: #94a3b8;
+      line-height: 1.6;
+    }
+    #score {
+      margin-top: 18px;
+      font-size: 0.95rem;
+      color: #cbd5e1;
+    }
+    #board {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 24px;
+    }
+    .cell {
+      aspect-ratio: 1;
+      border-radius: 18px;
+      background: rgba(148, 163, 184, 0.08);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(2.5rem, 5vw, 4rem);
+      font-weight: 700;
+      color: #e2e8f0;
+      cursor: pointer;
+      transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+      user-select: none;
+    }
+    .cell:hover {
+      transform: translateY(-2px);
+      background: rgba(148, 163, 184, 0.14);
+    }
+    .cell.disabled {
+      cursor: not-allowed;
+      opacity: 0.64;
+      transform: none;
+    }
+    .cell.x { color: #60a5fa; }
+    .cell.o { color: #fda4af; }
+    #status {
+      margin-top: 24px;
+      padding: 18px 20px;
+      border-radius: 18px;
+      background: rgba(30, 41, 59, 0.9);
+      color: #e2e8f0;
+      font-size: 1rem;
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .button-row {
+      margin-top: 22px;
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    button {
+      border: none;
+      border-radius: 9999px;
+      padding: 14px 22px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 160ms ease, box-shadow 160ms ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    #reset {
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      color: #0f172a;
+      box-shadow: 0 18px 40px rgba(56, 189, 248, 0.18);
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <h1>Tic Tac Toe</h1>
+    <p class="subtitle">Play as <strong>X</strong> against an intelligent AI opponent. Your move is followed automatically by the AI.</p>
+    <div id="score">Loading game...</div>
+    <div id="board"></div>
+    <div id="status"></div>
+    <div class="button-row">
+      <button id="reset">New Game</button>
+    </div>
+  </main>
+
+  <script>
+    let stateCache = null;
+    let busy = false;
+
+    function formatStatus(state) {
+      if (state.status === 'finished') {
+        if (state.winner) return state.draw ? 'Draw!' : `Winner: ${state.winner}`;
+        return 'Game over';
+      }
+      return state.currentPlayer === 'X' ? 'Your turn — tap an empty square' : 'AI is choosing...';
+    }
+
+    async function fetchState() {
+      const res = await fetch('/api/state');
+      return res.json();
+    }
+
+    async function refresh() {
+      stateCache = await fetchState();
+      render();
+    }
+
+    function render() {
+      const boardEl = document.getElementById('board');
+      const statusEl = document.getElementById('status');
+      const scoreEl = document.getElementById('score');
+      boardEl.innerHTML = '';
+
+      const xCount = stateCache.board.filter(v => v === 'X').length;
+      const oCount = stateCache.board.filter(v => v === 'O').length;
+      scoreEl.textContent = `You X: ${xCount} · AI O: ${oCount}`;
+      statusEl.textContent = formatStatus(stateCache);
+
+      stateCache.board.forEach((value, index) => {
+        const cell = document.createElement('div');
+        const isFilled = value !== '';
+        cell.className = 'cell' + (isFilled ? ` ${value.toLowerCase()}` : '');
+        if (stateCache.status === 'finished' || isFilled || busy) {
+          cell.classList.add('disabled');
+        }
+        cell.textContent = value;
+        cell.onclick = async () => {
+          if (busy || stateCache.status === 'finished' || isFilled) return;
+          busy = true;
+          statusEl.textContent = 'Processing your move...';
+          try {
+            const res = await fetch('/api/move?pos=' + index, { method: 'POST' });
+            stateCache = await res.json();
+          } catch (error) {
+            console.error(error);
+            statusEl.textContent = 'Network error. Please try again.';
+          } finally {
+            busy = false;
+            render();
+          }
+        };
+        boardEl.appendChild(cell);
+      });
+    }
+
+    document.getElementById('reset').onclick = async () => {
+      if (busy) return;
+      busy = true;
+      document.getElementById('status').textContent = 'Starting a new game...';
+      await fetch('/api/reset', { method: 'POST' });
+      busy = false;
+      await refresh();
+    };
+
+    refresh();
+  </script>
+</body>
+</html>
